@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>The Learning World</title>
     <style>
         :root {
@@ -19,11 +19,14 @@
             margin: 0;
             padding: 0;
             width: 100%;
-            height: 100%;
+            height: 100dvh;
             overflow: hidden;
             background-color: var(--current-bg);
             color: var(--current-text);
             transition: background-color 4s ease-in-out, color 4s ease-in-out;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
         #canvas-layer {
@@ -100,6 +103,20 @@
             opacity: 0.03;
             mix-blend-mode: multiply;
         }
+
+        @media (max-width: 768px) {
+            .ui-layer {
+                grid-template-columns: 1fr;
+                align-items: end;
+            }
+            .text-panel {
+                grid-column: 1;
+                padding: 2rem 2rem 15dvh 2rem;
+            }
+            p {
+                max-width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -143,12 +160,15 @@
         let isIdle = false;
         let idleTimer = 0;
 
-        // Guidance Arrow State
         let smoothVelX = 0;
         let smoothVelY = 0;
         let guideAngle = 0;
         let arrowVisualOpacity = 1.0;
         let currentTextState = "moving";
+        
+        let isTouch = false;
+        let tiltX = 0;
+        let tiltY = 0;
 
         const count = 500;
         const pos = new Float32Array(count * 2);
@@ -173,17 +193,57 @@
         }
 
         window.addEventListener('mousemove', (e) => {
+            isTouch = false;
             mouseX = e.clientX;
             mouseY = e.clientY;
             isIdle = false;
             idleTimer = 0;
         });
 
-        window.addEventListener('click', () => {
+        window.addEventListener('click', async () => {
             targetTension = Math.min(1.0, targetTension + 0.3);
             isIdle = false;
             idleTimer = 0;
+            
+            // Request tilt permission on iOS 13+ if needed
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission === 'granted') {
+                        window.addEventListener('deviceorientation', handleTilt);
+                    }
+                } catch (err) {
+                    // Fail silently, touch works fine
+                }
+            }
         });
+
+        window.addEventListener('touchstart', (e) => {
+            isTouch = true;
+            mouseX = e.touches[0].clientX;
+            mouseY = e.touches[0].clientY;
+            lastMouseX = mouseX;
+            lastMouseY = mouseY;
+            isIdle = false;
+            idleTimer = 0;
+        }, { passive: true });
+
+        window.addEventListener('touchmove', (e) => {
+            mouseX = e.touches[0].clientX;
+            mouseY = e.touches[0].clientY;
+            isIdle = false;
+            idleTimer = 0;
+        }, { passive: true });
+
+        // Native tilt for mobile feeling alive without touching
+        function handleTilt(e) {
+            if (!e.beta || !e.gamma) return;
+            // Gamma is left/right (-90 to 90), Beta is front/back (-180 to 180)
+            tiltX = Math.sin(e.gamma * Math.PI / 180) * 0.4;
+            tiltY = Math.sin(e.beta * Math.PI / 180) * 0.4;
+            isIdle = false;
+        }
+        window.addEventListener('deviceorientation', handleTilt);
 
         window.addEventListener('resize', () => {
             width = window.innerWidth;
@@ -198,7 +258,6 @@
             const dy = mouseY - lastMouseY;
             const speed = Math.sqrt(dx * dx + dy * dy);
 
-            // Track momentum for the guide arrow
             smoothVelX += (dx - smoothVelX) * 0.1;
             smoothVelY += (dy - smoothVelY) * 0.1;
             
@@ -220,7 +279,6 @@
 
             tension += (targetTension - tension) * 0.015;
 
-            // Arrow fades gently and patiently when tension rises
             let targetOp = tension > 0.35 ? 0.0 : 1.0;
             arrowVisualOpacity += (targetOp - arrowVisualOpacity) * 0.008;
 
@@ -235,42 +293,29 @@
                 subtext.style.opacity = '0';
                 
                 setTimeout(() => {
-                    // Only update if state hasn't shifted during the fade
                     if (currentTextState === stateKey) {
                         headline.innerText = head;
                         subtext.innerText = sub;
                         headline.style.opacity = '1';
                         subtext.style.opacity = '0.6';
                     }
-                }, 2000); // 2s crossfade gap perfectly aligns with 4s bg transition
+                }, 2000); 
             }
         }
 
         function updateUI() {
             if (tension > 0.6) {
-                setPatientText(
-                    "The glow fades.", 
-                    "We move too fast. The dark waits for calm.", 
-                    "fast"
-                );
+                setPatientText("The glow fades.", "We move too fast. The dark waits for calm.", "fast");
                 root.style.setProperty('--current-bg', 'var(--color-dark-bg)');
                 root.style.setProperty('--current-text', 'var(--color-dark-text)');
                 indicator.style.transform = "scale(2.5)";
             } else if (tension < 0.2 && isIdle) {
-                setPatientText(
-                    "The path clears.", 
-                    "The space steps aside. We can move through.", 
-                    "idle"
-                );
+                setPatientText("The path clears.", "The space steps aside. We can move through.", "idle");
                 root.style.setProperty('--current-bg', 'var(--color-light-bg)');
                 root.style.setProperty('--current-text', 'var(--color-light-text)');
                 indicator.style.transform = "scale(0.5)";
             } else if (tension > 0.25 && tension < 0.55) {
-                setPatientText(
-                    "I am here.", 
-                    "Follow the light. The shapes part like the wind.", 
-                    "moving"
-                );
+                setPatientText("I am here.", "Follow the light. The shapes part like the wind.", "moving");
                 root.style.setProperty('--current-bg', 'var(--color-light-bg)');
                 root.style.setProperty('--current-text', 'var(--color-light-text)');
                 indicator.style.transform = "scale(1)";
@@ -293,7 +338,7 @@
             const b = Math.floor(28 + (tension * 214));
             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.85 - (tension * 0.45)})`;
             
-            // Guide floats slightly ahead of the cursor
+            // Guide leads the cursor naturally
             const guideX = mouseX + Math.cos(guideAngle) * 35;
             const guideY = mouseY + Math.sin(guideAngle) * 35;
 
@@ -308,24 +353,34 @@
                 const dx = px - mouseX;
                 const dy = py - mouseY;
                 const distSq = dx * dx + dy * dy;
+                const dist = Math.sqrt(distSq);
 
                 const gdx = px - guideX;
                 const gdy = py - guideY;
                 const gDistSq = gdx * gdx + gdy * gdy;
 
-                // Split collision detection to favor the guide arrow for wind parting
-                if (tension <= 0.35 && gDistSq < influenceRadius * influenceRadius) {
-                    const dist = Math.sqrt(gDistSq);
-                    const force = Math.pow((influenceRadius - dist) / influenceRadius, 2);
+                // Frame the physical finger: Push everything out of a 50px core radius completely
+                if (isTouch && dist < 50) {
+                    const clearForce = (50 - dist) / 50;
+                    mom[i * 2] += (dx / dist) * clearForce * 12;
+                    mom[i * 2 + 1] += (dy / dist) * clearForce * 12;
+                } 
+                else if (tension <= 0.35 && gDistSq < influenceRadius * influenceRadius) {
+                    const gDist = Math.sqrt(gDistSq);
+                    const force = Math.pow((influenceRadius - gDist) / influenceRadius, 2);
                     const gentleForce = Math.pow(force, 3);
-                    mom[i * 2] += (gdx / dist) * gentleForce * 1.5;
-                    mom[i * 2 + 1] += (gdy / dist) * gentleForce * 1.5;
-                } else if (tension > 0.35 && distSq < influenceRadius * influenceRadius) {
-                    const dist = Math.sqrt(distSq);
+                    mom[i * 2] += (gdx / gDist) * gentleForce * 1.5;
+                    mom[i * 2 + 1] += (gdy / gDist) * gentleForce * 1.5;
+                } 
+                else if (tension > 0.35 && distSq < influenceRadius * influenceRadius) {
                     const force = Math.pow((influenceRadius - dist) / influenceRadius, 2);
                     mom[i * 2] += (dx / dist) * force * repelForce * 8;
                     mom[i * 2 + 1] += (dy / dist) * force * repelForce * 8;
                 }
+
+                // Add phone tilt gravity
+                mom[i * 2] += tiltX;
+                mom[i * 2 + 1] += tiltY;
 
                 mom[i * 2] += (bx - px) * returnForce;
                 mom[i * 2 + 1] += (by - py) * returnForce;
@@ -345,7 +400,6 @@
             }
             ctx.fill();
 
-            // Render neon guide arrow
             if (arrowVisualOpacity > 0.01) {
                 ctx.save();
                 ctx.translate(guideX, guideY);
@@ -363,7 +417,7 @@
                 
                 ctx.beginPath();
                 ctx.moveTo(-10, -6);
-                ctx.lineTo(3, 0); // Point
+                ctx.lineTo(3, 0); 
                 ctx.lineTo(-10, 6);
                 ctx.stroke();
                 
